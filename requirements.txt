@@ -1,0 +1,4 @@
+apache-airflow==3.4.0
+openai==3.46.0
+pymupdf4llm==2.1
+requests==2.34.2

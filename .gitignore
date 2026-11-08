@@ -1,0 +1,8 @@
+.venv/
+airflow/
+airflow~/
+data/
+start.sh
+__pycache__/
+*.pyc
+.idea/

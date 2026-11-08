@@ -25,12 +25,6 @@ LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "llama3.2:3b")
 MAX_CHARS = 6000  # part of the paper sent to the LLM
 
-CATEGORIES = [
-    "Data Engineering", "Machine Learning", "Natural Language Processing",
-    "Computer Vision", "Databases", "Software Engineering",
-    "Security & Privacy", "Responsible AI", "Other",
-]
-
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -100,6 +94,31 @@ def get_db():
     return conn
 
 
+def llm_text(client, prompt):
+    """Plain-text LLM call (no JSON), used for chunk summaries."""
+    resp = client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+    )
+    return resp.choices[0].message.content.strip()
+
+
+def condense(client, text):
+    """Shrink a long text by summarising it chunk by chunk, until it fits in MAX_CHARS."""
+    for _ in range(5):  # safety: at most 5 passes
+        if len(text) <= MAX_CHARS:
+            break
+        chunks = [text[i:i + MAX_CHARS] for i in range(0, len(text), MAX_CHARS)]
+        print(f"Condensing {len(chunks)} chunk(s)")
+        summaries = [
+            llm_text(client, "Summarise this passage of a document in 3-4 sentences:\n\n" + c)
+            for c in chunks
+        ]
+        text = "\n\n".join(summaries)
+    return text[:MAX_CHARS]
+
+
 def check_metadata(data):
     """Basic check: required fields exist with the expected types."""
     if not isinstance(data, dict):
@@ -112,9 +131,15 @@ def check_metadata(data):
         raise ValueError("Missing or invalid field: keywords")
 
 
+def known_categories():
+    """Categories already used in the database."""
+    with closing(get_db()) as conn:
+        return sorted({r[0] for r in conn.execute("SELECT DISTINCT category FROM papers")})
+
+
 # ---------- Tasks ----------
 @task
-def find_new_pdfs() -> list[str]:
+def find_new_pdfs():
     """Return PDFs in papers/ that are not yet in the database."""
     with closing(get_db()) as conn:
         known = {row[0] for row in conn.execute("SELECT filename FROM papers")}
@@ -124,7 +149,7 @@ def find_new_pdfs() -> list[str]:
 
 
 @task
-def convert_to_markdown(filename: str) -> dict:
+def convert_to_markdown(filename):
     MARKDOWN_DIR.mkdir(parents=True, exist_ok=True)
     md = pymupdf4llm.to_markdown(str(PAPERS_DIR / filename))
     md_path = MARKDOWN_DIR / (Path(filename).stem + ".md")
@@ -134,16 +159,20 @@ def convert_to_markdown(filename: str) -> dict:
 
 
 @task
-def extract_metadata(item: dict) -> dict:
+def extract_metadata(item):
     """Ask the local LLM for title/summary/keywords/category as JSON (1 retry)."""
-    text = Path(item["markdown_path"]).read_text(encoding="utf-8")[:MAX_CHARS]
+    full_text = Path(item["markdown_path"]).read_text(encoding="utf-8")
     client = OpenAI(base_url=LLM_BASE_URL, api_key="ollama")
+    text = condense(client, full_text)
+    existing = known_categories()
     messages = [
         {"role": "system", "content": (
             "You analyse research papers. Reply ONLY with a JSON object with exactly "
             'these keys: "title" (string), "summary" (string, 2-3 sentences), '
-            '"keywords" (list of 3-6 short strings), "category" (string, one of: '
-            + ", ".join(CATEGORIES) + ").")},
+            '"keywords" (list of 3-6 short strings), "category" (string, a short '
+            "topic label of 1 to 3 words, Title Case). Write all fields in English."
+            + (f"Reuse one of these existing categories if one clearly fits: "
+               f"{', '.join(existing)}. Otherwise create a new one." if existing else ""))},
         {"role": "user", "content": "Paper content:\n\n" + text},
     ]
     last_error = None
@@ -169,7 +198,7 @@ def extract_metadata(item: dict) -> dict:
 
 
 @task
-def save_to_db(meta: dict) -> dict:
+def save_to_db(meta):
     with closing(get_db()) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO papers (filename, title, summary, keywords, category) "
@@ -182,7 +211,7 @@ def save_to_db(meta: dict) -> dict:
 
 
 @task
-def generate_html(saved: list) -> str:
+def generate_html(saved):
     """Regenerate the static page from the whole database."""
     with closing(get_db()) as conn:
         rows = conn.execute(
@@ -202,7 +231,7 @@ def generate_html(saved: list) -> str:
 
 
 @task
-def notify_discord(item: dict) -> None:
+def notify_discord(item):
     url = os.environ.get("DISCORD_WEBHOOK_URL")
     if not url:
         print("DISCORD_WEBHOOK_URL not set, skipping notification")

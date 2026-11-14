@@ -98,7 +98,10 @@ def llm_text(client, prompt):
     """Plain-text LLM call (no JSON), used for chunk summaries."""
     resp = client.chat.completions.create(
         model=LLM_MODEL,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": instruction},
+            {"role": "user", "content": text},
+        ],
         temperature=0.2,
     )
     return resp.choices[0].message.content.strip()
@@ -112,7 +115,13 @@ def condense(client, text):
         chunks = [text[i:i + MAX_CHARS] for i in range(0, len(text), MAX_CHARS)]
         print(f"Condensing {len(chunks)} chunk(s)")
         summaries = [
-            llm_text(client, "Summarise this passage of a document in 3-4 sentences:\n\n" + c)
+            llm_text(
+                client,
+                "You summarise excerpts of a research paper. The user message IS the excerpt "
+                "(it may contain code, tables or references). Reply only with a 3-4 sentence "
+                "summary of its content. Never ask for more text.",
+                c,
+            )
             for c in chunks
         ]
         text = "\n\n".join(summaries)
@@ -170,7 +179,7 @@ def extract_metadata(item):
             "You analyse research papers. Reply ONLY with a JSON object with exactly "
             'these keys: "title" (string), "summary" (string, 2-3 sentences), '
             '"keywords" (list of 3-6 short strings), "category" (string, a short '
-            "topic label of 1 to 3 words, Title Case). Write all fields in English."
+            "topic label of 1 to 3 words, Title Case). Write all fields in English. "
             + (f"Reuse one of these existing categories if one clearly fits: "
                f"{', '.join(existing)}. Otherwise create a new one." if existing else ""))},
         {"role": "user", "content": "Paper content:\n\n" + text},

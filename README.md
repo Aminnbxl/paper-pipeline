@@ -40,7 +40,7 @@ Do not add Airflow's official `--constraint` file: it pins a different `openai` 
 
 ## Run
 
-1. Start Ollama (the app on macOS, `ollama serve` on Linux/WSL) and check the model: `ollama list`
+1. Start Ollama (the app on macOS, `ollama serve` on Linux/WSL), download the model once with `ollama pull llama3.2:3b`, then check it appears in `ollama list`.
 2. Create `ResearchLibrary/papers/` and `ResearchLibrary/output/` in your synced Google Drive folder and put some PDFs in `papers/`.
 3. Copy `start.example.sh` to `start.sh`, then edit it:
    - keep the `LIBRARY_DIR` line that matches your system (WSL2 or macOS) and fix the path if needed

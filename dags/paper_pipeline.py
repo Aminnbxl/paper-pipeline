@@ -94,7 +94,7 @@ def get_db():
     return conn
 
 
-def llm_text(client, prompt):
+def llm_text(client, instruction, text):
     """Plain-text LLM call (no JSON), used for chunk summaries."""
     resp = client.chat.completions.create(
         model=LLM_MODEL,

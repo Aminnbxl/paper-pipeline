@@ -6,3 +6,4 @@ start.sh
 __pycache__/
 *.pyc
 .idea/
+.DS_Store
